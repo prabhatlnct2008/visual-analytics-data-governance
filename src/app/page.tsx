@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { AnalysisResponse, UnsupportedResponse, ClarificationResponse, ErrorResponse } from "@/types/responses";
 
 type AnyResponse = AnalysisResponse | UnsupportedResponse | ClarificationResponse | ErrorResponse;
@@ -74,13 +75,18 @@ export default function Home() {
     <main className="flex-1 bg-gray-50">
       {/* Header */}
       <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Trusted Analytics Copilot
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Ask governed questions across approved retail datasets
-          </p>
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">
+              Trusted Analytics Copilot
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Ask governed questions across approved retail datasets
+            </p>
+          </div>
+          <Link href="/admin" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+            Admin Console
+          </Link>
         </div>
       </header>
 
