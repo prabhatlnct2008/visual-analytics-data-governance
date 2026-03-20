@@ -1,4 +1,4 @@
-import { getAnthropicClient } from "./client";
+import { getOpenAIClient } from "./client";
 import { NARRATION_PROMPT, buildNarrationMessage } from "./prompts";
 import type { MetricDefinition } from "@/types/metrics";
 import type { DataTable, ResponseSummary, KeyFinding } from "@/types/responses";
@@ -18,22 +18,25 @@ export async function narrateResults(
   dataTable: DataTable,
   metrics: MetricDefinition[]
 ): Promise<NarrationResult> {
-  const client = getAnthropicClient();
+  const client = getOpenAIClient();
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
+  const response = await client.chat.completions.create({
+    model: "gpt-4o",
     max_tokens: 2048,
-    system: NARRATION_PROMPT,
     messages: [
+      {
+        role: "system",
+        content: NARRATION_PROMPT,
+      },
       {
         role: "user",
         content: buildNarrationMessage(question, intentName, dataTable, metrics),
       },
     ],
+    temperature: 0,
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.choices[0]?.message?.content || "";
 
   const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
