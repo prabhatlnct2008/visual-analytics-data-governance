@@ -7,12 +7,40 @@ import { validateQueryParameters } from "@/lib/queries/validation";
 import { executeGovernedQuery } from "@/lib/queries/executor";
 import { buildResponseEnvelope } from "@/lib/output/envelope";
 import { generateChartSpec } from "@/lib/output/charts";
+import { checkRateLimit, ANALYZE_RATE_LIMIT } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import { auditLog } from "@/lib/db/schema";
 import type { QueryParameters } from "@/types/queries";
 import type { MetricDefinition } from "@/types/metrics";
 
+/** Timeout wrapper: rejects if a promise takes too long */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 export async function POST(request: NextRequest) {
+  // Rate limiting
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const rateCheck = checkRateLimit(`analyze:${ip}`, ANALYZE_RATE_LIMIT);
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { status: "ERROR", error: { code: "RATE_LIMITED", message: "Too many requests. Please wait a moment.", details: null } },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil((rateCheck.resetAt - Date.now()) / 1000)),
+          "X-RateLimit-Remaining": "0",
+        },
+      }
+    );
+  }
+
+  // Input validation
   const body = await request.json();
   const question: string = body.question;
 
@@ -23,20 +51,23 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Sanitize: limit length
+  const sanitizedQuestion = question.trim().slice(0, 1000);
+
   try {
     // Step 1: Classify intent
-    const { parsed, ambiguities, reasoning } = await classifyIntent(question);
+    const { parsed, ambiguities, reasoning } = await withTimeout(classifyIntent(sanitizedQuestion), 30_000, "Intent classification");
 
     // Handle unsupported requests
     if (!parsed) {
       const activeMetrics = await getActiveMetrics();
-      await logAudit(question, null, null, false, "Intent could not be mapped to an approved analysis type.");
+      await logAudit(sanitizedQuestion, null, null, false, "Intent could not be mapped to an approved analysis type.");
 
       return NextResponse.json({
         id: crypto.randomUUID(),
         status: "UNSUPPORTED",
         timestamp: new Date().toISOString(),
-        request: { originalQuestion: question },
+        request: { originalQuestion: sanitizedQuestion },
         reason: "This question could not be mapped to an approved analysis type.",
         unsupportedElements: [reasoning],
         suggestions: [
@@ -51,13 +82,13 @@ export async function POST(request: NextRequest) {
 
     // Handle ambiguities that need clarification
     if (ambiguities && ambiguities.length > 0 && parsed.confidence < 0.7) {
-      await logAudit(question, parsed.intentName, parsed.metrics, false, null);
+      await logAudit(sanitizedQuestion, parsed.intentName, parsed.metrics, false, null);
 
       return NextResponse.json({
         id: crypto.randomUUID(),
         status: "CLARIFICATION_NEEDED",
         timestamp: new Date().toISOString(),
-        request: { originalQuestion: question },
+        request: { originalQuestion: sanitizedQuestion },
         clarification: {
           question: "Your question could be interpreted in multiple ways. Please clarify:",
           options: ambiguities.map((a) => ({
@@ -94,13 +125,13 @@ export async function POST(request: NextRequest) {
     // Step 4: Validate
     const validation = await validateQueryParameters(queryParams);
     if (!validation.isValid) {
-      await logAudit(question, parsed.intentName, parsed.metrics, false, validation.errors.map((e) => e.message).join("; "));
+      await logAudit(sanitizedQuestion, parsed.intentName, parsed.metrics, false, validation.errors.map((e) => e.message).join("; "));
 
       return NextResponse.json({
         id: crypto.randomUUID(),
         status: "ERROR",
         timestamp: new Date().toISOString(),
-        request: { originalQuestion: question },
+        request: { originalQuestion: sanitizedQuestion },
         error: {
           code: "VALIDATION_FAILED",
           message: validation.errors.map((e) => e.message).join(" "),
@@ -110,15 +141,18 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Step 5: Execute governed query
-    const dataTable = await executeGovernedQuery(queryParams);
+    // Step 5: Execute governed query (timeout: 15s)
+    const dataTable = await withTimeout(
+      executeGovernedQuery(queryParams),
+      15_000,
+      "Database query"
+    );
 
-    // Step 6: Generate narration
-    const { summary, keyFindings } = await narrateResults(
-      question,
-      parsed.intentName,
-      dataTable,
-      resolvedMetrics
+    // Step 6: Generate narration (timeout: 30s)
+    const { summary, keyFindings } = await withTimeout(
+      narrateResults(sanitizedQuestion, parsed.intentName, dataTable, resolvedMetrics),
+      30_000,
+      "Result narration"
     );
 
     // Step 7: Generate chart spec
@@ -131,7 +165,7 @@ export async function POST(request: NextRequest) {
     // Step 8: Build response envelope
     const template = await resolveTemplate(parsed.intentName);
     const response = buildResponseEnvelope({
-      question,
+      question: sanitizedQuestion,
       intentName: parsed.intentName,
       intentTitle: template?.displayName || parsed.intentName,
       params: queryParams,
@@ -159,19 +193,19 @@ export async function POST(request: NextRequest) {
     });
 
     // Step 9: Audit log
-    await logAudit(question, parsed.intentName, parsed.metrics, true, null);
+    await logAudit(sanitizedQuestion, parsed.intentName, parsed.metrics, true, null);
 
     return NextResponse.json(response);
   } catch (error) {
     console.error("Analysis error:", error);
-    await logAudit(question, null, null, false, String(error));
+    await logAudit(sanitizedQuestion, null, null, false, String(error));
 
     return NextResponse.json(
       {
         id: crypto.randomUUID(),
         status: "ERROR",
         timestamp: new Date().toISOString(),
-        request: { originalQuestion: question },
+        request: { originalQuestion: sanitizedQuestion },
         error: {
           code: "INTERNAL_ERROR",
           message: "An error occurred while processing your question. Please try again.",

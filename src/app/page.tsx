@@ -84,9 +84,14 @@ export default function Home() {
               Ask governed questions across approved retail datasets
             </p>
           </div>
-          <Link href="/admin" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
-            Admin Console
-          </Link>
+          <div className="flex gap-4">
+            <Link href="/upload" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+              Upload Data
+            </Link>
+            <Link href="/admin" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+              Admin Console
+            </Link>
+          </div>
         </div>
       </header>
 

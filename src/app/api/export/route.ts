@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateCSV } from "@/lib/output/exports";
+import { generateCSV, generateXLSX } from "@/lib/output/exports";
 import { db } from "@/lib/db";
 import { auditLog } from "@/lib/db/schema";
 import type { AnalysisResponse } from "@/types/responses";
@@ -19,8 +19,6 @@ export async function POST(request: NextRequest) {
   try {
     if (format === "CSV") {
       const csv = generateCSV(response);
-
-      // Log export
       await logExport(response.request.originalQuestion, "CSV");
 
       return new NextResponse(csv, {
@@ -31,9 +29,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // XLSX export would go here in future
+    if (format === "XLSX") {
+      const buffer = await generateXLSX(response);
+      await logExport(response.request.originalQuestion, "XLSX");
+
+      return new NextResponse(buffer as unknown as BodyInit, {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="analysis-${response.id}.xlsx"`,
+        },
+      });
+    }
+
     return NextResponse.json(
-      { error: `Export format "${format}" is not yet supported.` },
+      { error: `Unsupported export format: "${format}". Use CSV or XLSX.` },
       { status: 400 }
     );
   } catch (error) {
