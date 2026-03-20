@@ -1,11 +1,11 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
-let client: Anthropic | null = null;
+let client: OpenAI | null = null;
 
-export function getAnthropicClient(): Anthropic {
+export function getOpenAIClient(): OpenAI {
   if (!client) {
-    client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
+    client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
     });
   }
   return client;

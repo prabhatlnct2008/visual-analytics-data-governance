@@ -1,4 +1,4 @@
-import { getAnthropicClient } from "./client";
+import { getOpenAIClient } from "./client";
 import {
   INTENT_CLASSIFICATION_PROMPT,
   buildIntentClassificationMessage,
@@ -34,28 +34,31 @@ const VALID_INTENTS: IntentName[] = [
 ];
 
 /**
- * Classify user intent using Claude API.
+ * Classify user intent using OpenAI API.
  * Returns null if the question cannot be mapped to an approved intent.
  */
 export async function classifyIntent(
   question: string
 ): Promise<{ parsed: ParsedIntent | null; ambiguities: string[] | null; reasoning: string }> {
-  const client = getAnthropicClient();
+  const client = getOpenAIClient();
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
+  const response = await client.chat.completions.create({
+    model: "gpt-4o",
     max_tokens: 1024,
-    system: INTENT_CLASSIFICATION_PROMPT,
     messages: [
+      {
+        role: "system",
+        content: INTENT_CLASSIFICATION_PROMPT,
+      },
       {
         role: "user",
         content: buildIntentClassificationMessage(question),
       },
     ],
+    temperature: 0,
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.choices[0]?.message?.content || "";
 
   // Parse JSON from response (handle markdown code blocks)
   const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
